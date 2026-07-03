@@ -95,6 +95,9 @@ select{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8
 .card .actions button,.card .actions a{flex:1;text-align:center;border-radius:10px;padding:9px 6px;font-size:.78rem;font-weight:700;text-decoration:none;border:1.5px solid var(--line);background:#fff;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:4px}
 .btn-visit.on{background:var(--gold);border-color:var(--gold);color:#fff}
 .btn-map{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn-dismiss{flex:0 0 auto!important;padding:9px 11px!important;color:var(--muted)}
+.btn-dismiss.on{background:#fdecea;border-color:#f3c6c0;color:#c0392b}
+.card.dismissed{opacity:.5}
 .empty{text-align:center;color:var(--muted);padding:40px 10px;font-weight:600}
 
 /* markers */
@@ -209,6 +212,7 @@ nav.bottomnav{flex:none;display:flex;background:#fff;border-top:1px solid var(--
       <span id="cats" style="display:flex;gap:8px"></span>
       <button class="tgl" id="openNow">🕒 مفتوح الآن</button>
       <button class="tgl gold" id="hideVisited">🙈 إخفاء المزارة</button>
+      <button class="tgl" id="showDismissed">🚫 عرض المستبعدة</button>
     </div>
     <div class="seg">
       <button id="segMap" class="on">🗺️ الخريطة</button>
@@ -301,7 +305,8 @@ const CACHE_KEY='tripify_cache_v2', HCACHE_KEY='tripify_homes_cache_v2';
 
 let sb=null, PLACES=[], HOMES={}, inited=false, mapInited=false;
 let visited={};
-const state={city:'',cats:new Set(),openNow:false,hideVisited:false,sort:'city'};
+const state={city:'',cats:new Set(),openNow:false,hideVisited:false,showDismissed:false,sort:'city'};
+let dismissed={};
 
 /* ---------- helpers ---------- */
 function isOpen(p){ return p.Opening_Hours && /^open|مفتوح/i.test(p.Opening_Hours.trim()); }
@@ -327,7 +332,7 @@ function rowToPlace(r){
     City:r.city, Country:r.country, Lat:r.lat, Lng:r.lng,
     Google_Maps_Link:r.google_maps_link, Opening_Hours:r.opening_hours,
     Price_Per_Person:r.price_per_person, Currency:r.currency, Cuisine_Type:r.cuisine_type,
-    Rating:r.rating, Source_URL:r.source_url, _visited:!!r.visited
+    Rating:r.rating, Source_URL:r.source_url, _visited:!!r.visited, _dismissed:!!r.dismissed
   };
 }
 
@@ -373,7 +378,7 @@ async function loadData(){
 }
 
 function afterData(){
-  visited={}; PLACES.forEach(p=>{ if(p._visited) visited[p.id]=true; });
+  visited={}; dismissed={}; PLACES.forEach(p=>{ if(p._visited) visited[p.id]=true; if(p._dismissed) dismissed[p.id]=true; });
   if(!inited){ buildFilters(); inited=true; } else { refreshCityOptions(); }
   updateWelcomeCounts();
   render();
@@ -430,8 +435,8 @@ function popupHtml(p){
     ${rows.join('')}
     <div class="pactions">
       ${p.Google_Maps_Link?`<a class="pmap" href="${esc(p.Google_Maps_Link)}" target="_blank">خرائط قوقل</a>`:''}
-      ${p.Source_URL?`<a href="${esc(p.Source_URL)}" target="_blank">المصدر</a>`:''}
       <button class="pvis ${v?'on':''}" onclick="toggleVisit(${p.id})">${v?'✓ زُرناه':'زُرناه؟'}</button>
+      <button class="pvis" onclick="toggleDismiss(${p.id})">${dismissed[p.id]?'↩️ رجّعه':'🚫 ما نبيه'}</button>
     </div></div>`;
 }
 
@@ -441,6 +446,7 @@ function filtered(){
     if(state.cats.size&&!state.cats.has(p.Category)) return false;
     if(state.openNow&&!isOpen(p)) return false;
     if(state.hideVisited&&visited[p.id]) return false;
+    if(!state.showDismissed&&dismissed[p.id]) return false;
     return true;
   });
   const s=state.sort;
@@ -454,8 +460,8 @@ function filtered(){
   return arr;
 }
 function cardHtml(p){
-  const v=visited[p.id];
-  return `<div class="card ${v?'visited':''}" data-id="${p.id}">
+  const v=visited[p.id], d=dismissed[p.id];
+  return `<div class="card ${v?'visited':''} ${d?'dismissed':''}" data-id="${p.id}">
     <div class="catbar" style="background:${catColor(p.Category)}"></div>
     <h3>${esc(p.Name)}</h3>
     <div class="sub">${(CATS[p.Category]||{}).icon||''} ${(CATS[p.Category]||{}).ar||esc(p.Category)} · ${esc(p.Subcategory||'')} · ${esc(p.City)}</div>
@@ -468,6 +474,7 @@ function cardHtml(p){
       <button class="btn-map" onclick="flyTo(${p.id})">📍 الخريطة</button>
       ${p.Google_Maps_Link?`<a href="${esc(p.Google_Maps_Link)}" target="_blank">🗺️ قوقل</a>`:''}
       <button class="btn-visit ${v?'on':''}" onclick="toggleVisit(${p.id})">${v?'✓ زُرناه':'⭐ زُرناه'}</button>
+      <button class="btn-dismiss ${d?'on':''}" onclick="toggleDismiss(${p.id})" title="${d?'رجّعه':'ما نبيه'}">${d?'↩️':'🚫'}</button>
     </div></div>`;
 }
 function renderHomes(){
@@ -514,6 +521,17 @@ window.toggleVisit=async function(id){
     if(error) alert('ما قدرت أحفظ الحالة (تأكدي من النت): '+error.message); }
 };
 
+/* toggle "ما نبيه" (استبعاد المكان) */
+window.toggleDismiss=async function(id){
+  const nv=!dismissed[id];
+  if(nv) dismissed[id]=true; else delete dismissed[id];
+  const p=PLACES.find(x=>x.id===id); if(p) p._dismissed=nv;
+  try{ localStorage.setItem(CACHE_KEY, JSON.stringify(PLACES)); }catch(e){}
+  render();
+  if(sb){ const {error}=await sb.from('places').update({dismissed:nv}).eq('id',id);
+    if(error) alert('ما قدرت أحفظ الحالة (تأكدي من النت): '+error.message); }
+};
+
 /* geolocation */
 function initLocate(){
   document.getElementById('locateBtn').onclick=function(){
@@ -556,6 +574,7 @@ function buildFilters(){
   });
   document.getElementById('openNow').onclick=function(){state.openNow=!state.openNow;this.classList.toggle('on');render();};
   document.getElementById('hideVisited').onclick=function(){state.hideVisited=!state.hideVisited;this.classList.toggle('on');render();};
+  document.getElementById('showDismissed').onclick=function(){state.showDismissed=!state.showDismissed;this.classList.toggle('on');render();};
 }
 
 /* segmented (mobile) */
