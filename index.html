@@ -60,6 +60,8 @@ a{color:var(--teal-d)}
 .filters::-webkit-scrollbar{display:none}
 .filters>*{flex:none}
 select{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 9px;font-family:inherit;font-size:.82rem;font-weight:600;color:var(--ink)}
+#searchBox{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 11px;font-family:inherit;font-size:.82rem;font-weight:600;color:var(--ink);min-width:150px}
+#searchBox:focus{outline:none;border-color:var(--teal)}
 .cat-chip{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:7px 12px;font-size:.8rem;font-weight:700;color:var(--muted);display:flex;align-items:center;gap:5px;white-space:nowrap}
 .cat-chip .dot{width:9px;height:9px;border-radius:50%}
 .cat-chip.on{color:#fff;border-color:transparent}
@@ -202,6 +204,7 @@ nav.bottomnav{flex:none;display:flex;background:#fff;border-top:1px solid var(--
       <div class="stat" id="stats"></div>
     </div>
     <div class="filters">
+      <input id="searchBox" type="search" placeholder="🔎 ابحث بالاسم">
       <select id="citySel"><option value="">🌍 كل المدن</option></select>
       <select id="sortSel">
         <option value="city">ترتيب: المدينة</option>
@@ -305,7 +308,7 @@ const CACHE_KEY='tripify_cache_v2', HCACHE_KEY='tripify_homes_cache_v2';
 
 let sb=null, PLACES=[], HOMES={}, inited=false, mapInited=false;
 let visited={};
-const state={city:'',cats:new Set(),openNow:false,hideVisited:false,showDismissed:false,sort:'city'};
+const state={city:'',cats:new Set(),openNow:false,hideVisited:false,showDismissed:false,q:'',sort:'city'};
 let dismissed={};
 
 /* ---------- helpers ---------- */
@@ -314,6 +317,15 @@ function priceVal(p){ if(!p.Price_Per_Person)return null; const n=(p.Price_Per_P
 function catColor(c){ return (CATS[c]||{}).color||'#888'; }
 function esc(s){ return (s||'').toString().replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 function getHomes(){ return HOMES; }
+/* رابط قوقل موثوق يفتح التطبيق ويوقف على المكان بالضبط (من الإحداثيات) */
+function mapsUrl(p){
+  if(p.Lat!=null && p.Lng!=null) return `https://www.google.com/maps/search/?api=1&query=${p.Lat},${p.Lng}`;
+  return p.Google_Maps_Link||'';
+}
+function mapsUrlLL(latlng){
+  if(latlng && latlng.length===2) return `https://www.google.com/maps/search/?api=1&query=${latlng[0]},${latlng[1]}`;
+  return '';
+}
 
 function parseLatLng(input){
   if(!input) return null; input=input.trim();
@@ -434,14 +446,16 @@ function popupHtml(p){
     <div class="meta">${p.Rating?`<span class="badge rate">⭐ ${p.Rating}</span>`:''}${isOpen(p)?'<span class="badge open">مفتوح</span>':''}</div>
     ${rows.join('')}
     <div class="pactions">
-      ${p.Google_Maps_Link?`<a class="pmap" href="${esc(p.Google_Maps_Link)}" target="_blank">خرائط قوقل</a>`:''}
+      ${mapsUrl(p)?`<a class="pmap" href="${esc(mapsUrl(p))}" target="_blank" rel="noopener">خرائط قوقل</a>`:''}
       <button class="pvis ${v?'on':''}" onclick="toggleVisit(${p.id})">${v?'✓ زُرناه':'زُرناه؟'}</button>
       <button class="pvis" onclick="toggleDismiss(${p.id})">${dismissed[p.id]?'↩️ رجّعه':'🚫 ما نبيه'}</button>
     </div></div>`;
 }
 
 function filtered(){
+  const q=state.q.trim().toLowerCase();
   let arr=PLACES.filter(p=>{
+    if(q){ const hay=[p.Name,p.City,p.Subcategory,p.Cuisine_Type,p.Category].join(' ').toLowerCase(); if(!hay.includes(q)) return false; }
     if(state.city&&p.City!==state.city) return false;
     if(state.cats.size&&!state.cats.has(p.Category)) return false;
     if(state.openNow&&!isOpen(p)) return false;
@@ -472,7 +486,7 @@ function cardHtml(p){
     </div>
     <div class="actions">
       <button class="btn-map" onclick="flyTo(${p.id})">📍 الخريطة</button>
-      ${p.Google_Maps_Link?`<a href="${esc(p.Google_Maps_Link)}" target="_blank">🗺️ قوقل</a>`:''}
+      ${mapsUrl(p)?`<a href="${esc(mapsUrl(p))}" target="_blank" rel="noopener">🗺️ قوقل</a>`:''}
       <button class="btn-visit ${v?'on':''}" onclick="toggleVisit(${p.id})">${v?'✓ زُرناه':'⭐ زُرناه'}</button>
       <button class="btn-dismiss ${d?'on':''}" onclick="toggleDismiss(${p.id})" title="${d?'رجّعه':'ما نبيه'}">${d?'↩️':'🚫'}</button>
     </div></div>`;
@@ -484,7 +498,7 @@ function renderHomes(){
   [['hotel',H.hotel],['grandma',H.grandma]].forEach(([t,d])=>{
     if(d&&d.latlng){
       const m=L.marker(d.latlng,{icon:homeIcon(t)}).addTo(map)
-        .bindPopup(`<div class="pop"><h3>${t==='hotel'?'🏨':'🏡'} ${esc(d.name)}</h3><div class="pactions">${d.url?`<a class="pmap" href="${esc(d.url)}" target="_blank">فتح في الخرائط</a>`:''}<button onclick="flyHome('${t}')">تكبير</button></div></div>`);
+        .bindPopup(`<div class="pop"><h3>${t==='hotel'?'🏨':'🏡'} ${esc(d.name)}</h3><div class="pactions">${mapsUrlLL(d.latlng)?`<a class="pmap" href="${esc(mapsUrlLL(d.latlng))}" target="_blank" rel="noopener">فتح في الخرائط</a>`:''}<button onclick="flyHome('${t}')">تكبير</button></div></div>`);
       homeMarkers.push(m);
     }
   });
@@ -562,6 +576,7 @@ function buildFilters(){
   refreshCityOptions();
   const sel=document.getElementById('citySel');
   sel.onchange=e=>{state.city=e.target.value;render();};
+  document.getElementById('searchBox').oninput=e=>{state.q=e.target.value;render();};
   document.getElementById('sortSel').onchange=e=>{state.sort=e.target.value;render();};
   const cc=document.getElementById('cats'); cc.innerHTML='';
   Object.entries(CATS).forEach(([k,v])=>{
