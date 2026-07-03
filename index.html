@@ -286,8 +286,8 @@ nav.bottomnav{flex:none;display:flex;background:#fff;border-top:1px solid var(--
    إعدادات الاتصال بـ Supabase  ← غيّري القيمتين التاليتين فقط
    (تلقاهم في: Supabase → Project Settings → API)
    ===================================================================== */
-const SUPABASE_URL = 'https://prfulgqmbvvfoahyilcc.supabase.co/rest/v1/';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InByZnVsZ3FtYnZ2Zm9haHlpbGNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwOTcyODQsImV4cCI6MjA5ODY3MzI4NH0.MnatoOfCN5Ydk2Ha5RELsLqd46xSRq0mDvoqIDxwUKk';
+const SUPABASE_URL = "https://prfulgqmbvvfoahyilcc.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InByZnVsZ3FtYnZ2Zm9haHlpbGNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwOTcyODQsImV4cCI6MjA5ODY3MzI4NH0.MnatoOfCN5Ydk2Ha5RELsLqd46xSRq0mDvoqIDxwUKk";
 /* ===================================================================== */
 
 const CATS = {
@@ -343,22 +343,31 @@ function initSupabase(){
     w.innerHTML='⚠️ قاعدة البيانات غير مربوطة — افتح index.html وحط رابط ومفتاح Supabase في أول السكربت (راجع دليل الإعداد).';
     return false;
   }
-  sb=window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  let url=SUPABASE_URL.trim();
+  try{ url=new URL(url).origin; }catch(e){ url=url.replace(/\/+$/,''); }  // ياخذ https://xxx.supabase.co فقط
+  sb=window.supabase.createClient(url, SUPABASE_ANON_KEY.trim());
+  console.log('Supabase URL used:', url);
   return true;
 }
 
 /* =====================================================================
    DATA
    ===================================================================== */
+function showBanner(msg){ const w=document.getElementById('cfgwarn'); w.className='show'; w.textContent=msg; }
+function hideBanner(){ const w=document.getElementById('cfgwarn'); w.className=''; }
+
 async function loadData(){
   // 1) اعرض الكاش فوراً (يشتغل حتى بدون نت)
   try{ const c=localStorage.getItem(CACHE_KEY); if(c){ PLACES=JSON.parse(c); afterData(); } }catch(e){}
   // 2) حدّث من القاعدة
   if(!sb) return;
   const {data,error}=await sb.from('places').select('*').order('city',{ascending:true});
-  if(!error && data){
+  if(error){ console.error('loadData error:',error); showBanner('⚠️ خطأ في جلب البيانات: '+(error.message||'')+' — '+(error.code||error.hint||'')); return; }
+  if(data){
     PLACES=data.map(rowToPlace);
     try{ localStorage.setItem(CACHE_KEY, JSON.stringify(PLACES)); }catch(e){}
+    if(data.length===0){ showBanner('ℹ️ الاتصال تمام لكن ما رجعت أماكن (0) — تأكد من صلاحيات القراءة للدور anon، أو أن الجدول اسمه places.'); }
+    else hideBanner();
     afterData();
   }
 }
